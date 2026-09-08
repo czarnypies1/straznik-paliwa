@@ -1,0 +1,72 @@
+name: Straznik Paliwa
+
+on:
+  schedule:
+    # Co godzinę między 5:00 a 21:00 czasu polskiego.
+    # Orlen publikuje cennik rano, a w nocy i tak nic się nie dzieje -
+    # nie ma sensu budzić maszyny 24 razy na dobę.
+    - cron: "0 3-19 * * *"
+
+  # Przycisk do ręcznego uruchomienia w zakładce Actions
+  workflow_dispatch:
+    inputs:
+      wymus_raport:
+        description: "Wyślij raport nawet jeśli nic się nie zmieniło"
+        type: boolean
+        default: false
+
+  # Po każdej zmianie kodu uruchom przynajmniej testy
+  push:
+    branches: [main]
+
+# Dwa uruchomienia naraz mogłyby sobie nadpisać stan
+concurrency:
+  group: straznik
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  straznik:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Pobierz kod
+        uses: actions/checkout@v4
+
+      - name: Ustaw Pythona
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Testy
+        run: python -m unittest -v
+
+      - name: Uruchom Strażnika
+        if: github.event_name != 'push'
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ "${{ inputs.wymus_raport }}" = "true" ]; then
+            python straznik.py --test
+          else
+            python straznik.py
+          fi
+
+      - name: Zapisz stan i historię
+        if: github.event_name != 'push'
+        run: |
+          git config user.name "straznik-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add stan.json historia.csv
+          if git diff --staged --quiet; then
+            echo "Nic nowego do zapisania"
+          else
+            git commit -m "Strażnik: pomiar $(date -u '+%Y-%m-%d %H:%M UTC')"
+            git pull --rebase --autostash
+            git push
+          fi
