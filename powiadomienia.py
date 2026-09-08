@@ -165,9 +165,23 @@ def _zbuduj_embed(analiza: dict, problemy: list[str] | None = None) -> dict:
 # ---------------------------------------------------------------------------
 
 def _wyslij_json(url: str, ladunek: dict) -> None:
+    """
+    Wysyła JSON-a pod wskazany adres.
+
+    User-Agent jest tu inny niż w module źródeł i to nie przypadek.
+    Serwisy finansowe odrzucają ruch, który nie wygląda na przeglądarkę,
+    ale Cloudflare przed Discordem robi dokładnie odwrotnie: blokuje
+    zapytania podszywające się pod Mozillę (błąd 1010) i przepuszcza te,
+    które uczciwie mówią, czym są.
+    """
     dane = json.dumps(ladunek).encode("utf-8")
     zapytanie = urllib.request.Request(
-        url, data=dane, headers={"Content-Type": "application/json"}
+        url,
+        data=dane,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "StraznikPaliwa (https://github.com, 1.0)",
+        },
     )
     urllib.request.urlopen(zapytanie, timeout=CZAS_OCZEKIWANIA)
 
