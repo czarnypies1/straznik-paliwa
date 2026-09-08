@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
@@ -176,8 +177,30 @@ def wyslij_discord(analiza: dict, problemy: list[str] | None = None) -> str:
     if not webhook:
         return "Discord: pominięty (brak DISCORD_WEBHOOK)"
 
-    _wyslij_json(webhook, {"embeds": [_zbuduj_embed(analiza, problemy)]})
-    return "Discord: wysłano"
+    try:
+        _wyslij_json(webhook, {"embeds": [_zbuduj_embed(analiza, problemy)]})
+        return "Discord: wysłano"
+    except urllib.error.HTTPError as blad:
+        # Discord odsyła w treści konkretny powód odmowy. Bez niego
+        # zostaje samo "403", które nie mówi nic poza tym, że nie wolno.
+        try:
+            szczegoly = blad.read().decode("utf-8", "replace")[:300]
+        except Exception:
+            szczegoly = "(nie udało się odczytać treści)"
+
+        # Opis adresu bez ujawniania tokena - sam kształt wystarczy,
+        # żeby stwierdzić, czy do sekretu trafiło to, co powinno.
+        czesci = webhook.split("/")
+        opis = (
+            f"długość {len(webhook)} znaków, "
+            f"host {czesci[2] if len(czesci) > 2 else '?'}, "
+            f"id {czesci[5][:10] if len(czesci) > 5 else '?'}"
+        )
+
+        return (
+            f"Discord: HTTP {blad.code} - {szczegoly} "
+            f"[webhook: {opis}]"
+        )
 
 
 def wyslij_telegram(analiza: dict, problemy: list[str] | None = None) -> str:
