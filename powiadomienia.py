@@ -155,7 +155,7 @@ def _zbuduj_embed(analiza: dict, problemy: list[str] | None = None) -> dict:
         "description": WYJASNIENIA.get(sygnal, ""),
         "color": KOLORY.get(sygnal, KOLORY["SPOKOJ"]),
         "fields": pola,
-        "footer": {"text": "Źródła: Orlen, NBP, Stooq"},
+        "footer": {"text": "Źródła: Orlen, NBP, Yahoo Finance"},
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
