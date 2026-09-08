@@ -21,9 +21,12 @@ import urllib.request
 LITROW_W_BARYLCE = 158.987
 
 # Nagłówek przedstawiający Strażnika. Część serwisów odrzuca ruch bez User-Agent.
+# Część serwisów finansowych odrzuca ruch, który nie wygląda na przeglądarkę,
+# ale wypada się przedstawić - stąd prefiks zgodny z konwencją plus nazwa projektu.
 NAGLOWKI = {
-    "User-Agent": "Straznik-Paliwa/1.0 (projekt edukacyjny; +github.com)",
+    "User-Agent": "Mozilla/5.0 (compatible; Straznik-Paliwa/1.0; projekt edukacyjny)",
     "Accept": "application/json, text/csv, */*",
+    "Accept-Language": "pl,en;q=0.8",
 }
 
 CZAS_OCZEKIWANIA = 20
@@ -126,27 +129,59 @@ def pobierz_kurs_usd() -> dict:
 # Stooq - notowania ropy Brent
 # ---------------------------------------------------------------------------
 
-URL_BRENT = "https://stooq.pl/q/l/?s=cb.f&f=sd2t2ohlcv&h&e=csv"
+# Notowanie ropy pobieramy z łańcucha kandydatów, nie z jednego adresu.
+#
+# Powód jest praktyczny: w marcu 2026 Stooq zamknął darmowe pobieranie CSV
+# za kluczem API i źródło, które działało od lat, przestało odpowiadać.
+# Skoro jedno źródło może paść bez uprzedzenia, to Strażnik ma po prostu
+# spróbować następnego, zamiast zgłaszać awarię.
+#
+# Kolejność ma znaczenie - pierwsze na liście są te, które wymagają
+# najmniej i najrzadziej się psują.
+
+ZRODLA_BRENT = [
+    ("yahoo-1", "https://query1.finance.yahoo.com/v8/finance/chart/BZ=F?range=5d&interval=1d"),
+    ("yahoo-2", "https://query2.finance.yahoo.com/v8/finance/chart/BZ=F?range=5d&interval=1d"),
+    ("stooq-com", "https://stooq.com/q/l/?s=cb.f&f=sd2t2ohlcv&h&e=csv"),
+]
 
 
-def pobierz_brent() -> dict:
-    """
-    Notowanie ropy Brent (kontrakt na giełdzie ICE), w dolarach za baryłkę.
+def _brent_z_yahoo(tekst: str) -> dict:
+    """Wyciąga notowanie z odpowiedzi Yahoo Finance."""
+    dane = json.loads(tekst)
+    wyniki = (dane.get("chart") or {}).get("result") or []
 
-    Brent jest przyczyną na początku łańcucha, ale reaguje najszybciej -
-    dlatego traktujemy go jako wczesne ostrzeżenie, a nie jako prognozę.
-    """
-    tekst = _pobierz(URL_BRENT)
+    if not wyniki:
+        blad = (dane.get("chart") or {}).get("error")
+        raise BladZrodla(f"Yahoo nie zwróciło notowania: {blad}")
+
+    meta = wyniki[0].get("meta") or {}
+    cena = meta.get("regularMarketPrice")
+
+    if cena is None:
+        raise BladZrodla("Brak ceny w odpowiedzi Yahoo")
+
+    return {
+        "cena_usd": float(cena),
+        "otwarcie_usd": (
+            float(meta["chartPreviousClose"])
+            if meta.get("chartPreviousClose") is not None
+            else None
+        ),
+        "data": "",
+    }
+
+
+def _brent_z_csv(tekst: str) -> dict:
+    """Wyciąga notowanie z CSV w formacie Stooq."""
     wiersze = list(csv.DictReader(io.StringIO(tekst)))
-
     if not wiersze:
-        raise BladZrodla("Stooq nie zwrócił notowania Brent")
+        raise BladZrodla("Puste CSV")
 
     wiersz = wiersze[0]
 
-    def liczba(*nazwy_kolumn):
-        """Stooq bywa niekonsekwentny w nazwach kolumn, więc próbujemy kilku."""
-        for nazwa in nazwy_kolumn:
+    def liczba(*nazwy):
+        for nazwa in nazwy:
             wartosc = wiersz.get(nazwa)
             if wartosc not in (None, "", "N/D"):
                 try:
@@ -155,17 +190,39 @@ def pobierz_brent() -> dict:
                     continue
         return None
 
-    zamkniecie = liczba("Zamkniecie", "Zamknięcie", "Close")
-    otwarcie = liczba("Otwarcie", "Open")
-
-    if zamkniecie is None:
-        raise BladZrodla(f"Nie rozpoznano formatu danych ze Stooq: {wiersz}")
+    cena = liczba("Zamkniecie", "Zamknięcie", "Close")
+    if cena is None:
+        raise BladZrodla(f"Nie rozpoznano kolumn: {list(wiersz)}")
 
     return {
-        "cena_usd": zamkniecie,
-        "otwarcie_usd": otwarcie,
+        "cena_usd": cena,
+        "otwarcie_usd": liczba("Otwarcie", "Open"),
         "data": wiersz.get("Data") or wiersz.get("Date") or "",
     }
+
+
+def pobierz_brent() -> dict:
+    """
+    Notowanie ropy Brent (kontrakt ICE), w dolarach za baryłkę.
+
+    Brent stoi na początku łańcucha i reaguje najszybciej - dlatego jest
+    wczesnym ostrzeżeniem, a nie prognozą. Prognozę daje hurt Orlenu.
+
+    Próbuje kolejnych źródeł, dopóki któreś nie odpowie poprawnie.
+    """
+    napotkane = []
+
+    for nazwa, url in ZRODLA_BRENT:
+        try:
+            tekst = _pobierz(url)
+            parser = _brent_z_yahoo if "yahoo" in nazwa else _brent_z_csv
+            wynik = parser(tekst)
+            wynik["zrodlo"] = nazwa
+            return wynik
+        except Exception as blad:
+            napotkane.append(f"{nazwa}: {blad}")
+
+    raise BladZrodla("żadne źródło Brenta nie odpowiedziało - " + "; ".join(napotkane))
 
 
 # ---------------------------------------------------------------------------

@@ -84,10 +84,17 @@ Wyłącznie publiczne, oficjalne, bez kluczy API i bez rejestracji:
 |---|---|---|---|
 | Hurtowe ceny paliw | ORLEN S.A. — `tool.orlen.pl/api/wholesalefuelprices` | JSON | codziennie |
 | Kurs USD/PLN | Narodowy Bank Polski — tabela A | JSON | dni robocze |
-| Ropa Brent (ICE) | Stooq — symbol `cb.f` | CSV | na bieżąco |
+| Ropa Brent (ICE) | Yahoo Finance — symbol `BZ=F`, z zapasem | JSON | na bieżąco |
 
 Endpoint Orlenu to ten sam, z którego korzysta oficjalna strona
 „Hurtowe ceny paliw". Ceny w PLN za m³, netto, z akcyzą i opłatą paliwową.
+
+Brent ma **łańcuch źródeł zapasowych**, nie jeden adres. Pierwotnie
+korzystałem ze Stooq, ale w marcu 2026 zamknęli darmowe pobieranie CSV
+za kluczem API i źródło padło w trakcie budowy projektu. Zamiast podmienić
+jeden adres na drugi, Strażnik próbuje teraz kolejnych kandydatów, dopóki
+któryś nie odpowie. To była pierwsza rzecz, jakiej ten projekt mnie nauczył:
+źródło, które działa dziś, nie musi działać jutro.
 
 ## Jak to jest zbudowane
 
@@ -96,7 +103,8 @@ zrodla.py          pobieranie z trzech API, każde źródło osobno
 analiza.py         przeliczenia, progi, decyzja o sygnale
 powiadomienia.py   Discord (embed) i Telegram (HTML), wysyłka równoległa
 straznik.py        orkiestracja, pamięć stanu, zapis historii
-test_straznik.py   14 testów jednostkowych, bez dostępu do sieci
+test_straznik.py   19 testów jednostkowych, bez dostępu do sieci
+diagnostyka.py     sprawdza po kolei, które źródła odpowiadają
 ```
 
 Rozdzielenie na warstwy nie jest tu dla ozdoby: dzięki temu, że `analiza.py`
@@ -130,8 +138,13 @@ Lokalnie:
 python straznik.py           # normalne uruchomienie
 python straznik.py --test    # wyślij raport niezależnie od zmian
 python straznik.py --sucho   # pokaż raport w konsoli, nic nie wysyłaj
+python diagnostyka.py        # sprawdź, które źródła żyją
 python -m unittest -v        # testy
 ```
+
+Diagnostykę da się też odpalić z zakładki Actions — w oknie „Run workflow"
+jest przełącznik „Tylko sprawdź źródła". Nie wysyła powiadomień
+i nie rusza stanu.
 
 Konfiguracja przez zmienne środowiskowe (w Actions: repository secrets).
 Wystarczy jeden kanał, oba są opcjonalne:

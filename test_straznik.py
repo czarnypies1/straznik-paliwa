@@ -8,10 +8,12 @@ Uruchomienie:
     python -m unittest -v
 """
 
+import json
 import unittest
 
 import analiza as an
 import powiadomienia
+import zrodla
 
 
 PRZYKLADOWE_DANE = {
@@ -126,6 +128,65 @@ class TestPowiadomien(unittest.TestCase):
 
         self.assertEqual(len(raporty), 2)
         self.assertTrue(all("pominięty" in r or "wysłano" in r for r in raporty))
+
+
+class TestZrodelBrenta(unittest.TestCase):
+    """Sprawdza parsery i łańcuch zapasowy, bez wychodzenia do sieci."""
+
+    def test_parser_yahoo(self):
+        odpowiedz = json.dumps({
+            "chart": {"result": [{"meta": {
+                "regularMarketPrice": 96.28,
+                "chartPreviousClose": 95.10,
+            }}]}
+        })
+        wynik = zrodla._brent_z_yahoo(odpowiedz)
+        self.assertAlmostEqual(wynik["cena_usd"], 96.28)
+
+    def test_parser_yahoo_zglasza_blad_gdy_pusto(self):
+        with self.assertRaises(zrodla.BladZrodla):
+            zrodla._brent_z_yahoo(json.dumps({"chart": {"result": []}}))
+
+    def test_parser_csv(self):
+        csv_tekst = (
+            "Symbol,Data,Czas,Otwarcie,Najwyzszy,Najnizszy,Zamkniecie,Wolumen\n"
+            "CB.F,2026-09-08,20:00:00,95.10,97.00,94.80,96.28,120000\n"
+        )
+        wynik = zrodla._brent_z_csv(csv_tekst)
+        self.assertAlmostEqual(wynik["cena_usd"], 96.28)
+        self.assertAlmostEqual(wynik["otwarcie_usd"], 95.10)
+
+    def test_lancuch_przechodzi_do_kolejnego_zrodla(self):
+        proby = []
+
+        def udawane_pobranie(url):
+            proby.append(url)
+            if len(proby) == 1:
+                raise zrodla.BladZrodla("HTTP 404")
+            return json.dumps({
+                "chart": {"result": [{"meta": {"regularMarketPrice": 99.0}}]}
+            })
+
+        oryginal = zrodla._pobierz
+        zrodla._pobierz = udawane_pobranie
+        try:
+            wynik = zrodla.pobierz_brent()
+        finally:
+            zrodla._pobierz = oryginal
+
+        self.assertEqual(len(proby), 2)          # pierwsze padło, drugie zadziałało
+        self.assertAlmostEqual(wynik["cena_usd"], 99.0)
+
+    def test_gdy_wszystkie_zrodla_pada_leci_wyjatek(self):
+        oryginal = zrodla._pobierz
+        zrodla._pobierz = lambda url: (_ for _ in ()).throw(
+            zrodla.BladZrodla("padło")
+        )
+        try:
+            with self.assertRaises(zrodla.BladZrodla):
+                zrodla.pobierz_brent()
+        finally:
+            zrodla._pobierz = oryginal
 
 
 if __name__ == "__main__":
